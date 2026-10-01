@@ -14,6 +14,35 @@ def load_system_prompt():
     return path.read_text(encoding="utf-8")
 
 
+def read_file(path):
+    """Outil : lit un fichier texte et renvoie son contenu."""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return f"Erreur : le fichier '{path}' n'existe pas."
+    except Exception as e:
+        return f"Erreur en lisant '{path}' : {e}"
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Lit le contenu d'un fichier texte du projet.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Chemin du fichier, par exemple 'agent.py'",
+                    }
+                },
+                "required": ["path"],
+            },
+        },
+    }
+]    
+
 def main():
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
     history = [{"role": "system", "content": load_system_prompt()}]
@@ -23,7 +52,7 @@ def main():
     while True:
         user_input = input("\nvous > ").strip()
 
-        if user_input == "/exit":
+        if user_input in ("/exit", "exit", "quit"):
             print("Au revoir !")
             break
         if not user_input:
