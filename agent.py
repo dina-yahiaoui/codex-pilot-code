@@ -2,6 +2,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
+import json
 
 load_dotenv()          # lit ta clé dans le fichier .env
 client = OpenAI()
@@ -43,6 +44,59 @@ TOOLS = [
     }
 ]    
 
+MAX_TOOL_ROUNDS = 10  # sécurité : jamais plus de 10 outils à la suite
+
+
+def agent_turn(history):
+    """La boucle agentique : tourne jusqu'à ce que le LLM réponde sans demander d'outil."""
+    for _ in range(MAX_TOOL_ROUNDS):
+        # 1. On envoie l'historique ET la liste des outils
+        response = client.chat.completions.create(
+            model=MODEL, messages=history, tools=TOOLS
+        )
+        message = response.choices[0].message
+
+        # 2. Pas de demande d'outil -> c'est la réponse finale
+        if not message.tool_calls:
+            history.append({"role": "assistant", "content": message.content})
+            return message.content
+
+        # 3. Le LLM demande un outil : on garde sa demande dans l'historique
+        history.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }
+                for call in message.tool_calls
+            ],
+        })
+
+        # 4. On exécute chaque outil demandé et on renvoie le résultat
+        for call in message.tool_calls:
+            args = json.loads(call.function.arguments)
+            print(f"  [outil] {call.function.name}({args})")
+
+            if call.function.name == "read_file":
+                result = read_file(args["path"])
+            else:
+                result = f"Erreur : outil inconnu '{call.function.name}'."
+
+            history.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": result,
+            })
+        # 5. On recommence : le LLM va lire le résultat et décider de la suite
+
+    return "Arrêt : trop d'appels d'outils à la suite."
+
 def main():
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
     history = [{"role": "system", "content": load_system_prompt()}]
@@ -61,12 +115,8 @@ def main():
         # 1. On ajoute ton message à l'historique
         history.append({"role": "user", "content": user_input})
 
-        # 2. On envoie TOUT l'historique au LLM
-        response = client.chat.completions.create(model=MODEL, messages=history)
-        answer = response.choices[0].message.content
-
-        # 3. On ajoute sa réponse à l'historique, puis on l'affiche
-        history.append({"role": "assistant", "content": answer})
+        # 2. On lance la boucle agentique (elle ajoute elle-même les réponses à l'historique)
+        answer = agent_turn(history)
         print(f"\nagent > {answer}")
 
 
