@@ -1,8 +1,8 @@
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
-import json
 
 load_dotenv()          # lit ta clé dans le fichier .env
 client = OpenAI()
@@ -24,6 +24,7 @@ def read_file(path):
     except Exception as e:
         return f"Erreur en lisant '{path}' : {e}"
 
+
 TOOLS = [
     {
         "type": "function",
@@ -33,16 +34,20 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
                     "path": {
                         "type": "string",
                         "description": "Chemin du fichier, par exemple 'agent.py'",
-                    }
+                    },
                 },
-                "required": ["path"],
+                "required": ["raison", "path"],
             },
         },
     }
-]    
+]
 
 MAX_TOOL_ROUNDS = 10  # sécurité : jamais plus de 10 outils à la suite
 
@@ -81,6 +86,12 @@ def agent_turn(history):
         # 4. On exécute chaque outil demandé et on renvoie le résultat
         for call in message.tool_calls:
             args = json.loads(call.function.arguments)
+
+            # NOUVEAU : on récupère la raison, on l'affiche, et on l'enlève des arguments
+            raison = args.pop("raison", "")
+            if raison:
+                print(f"  [réflexion] {raison}")
+
             print(f"  [outil] {call.function.name}({args})")
 
             if call.function.name == "read_file":
@@ -96,6 +107,7 @@ def agent_turn(history):
         # 5. On recommence : le LLM va lire le résultat et décider de la suite
 
     return "Arrêt : trop d'appels d'outils à la suite."
+
 
 def main():
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
