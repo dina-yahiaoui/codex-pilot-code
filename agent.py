@@ -1,4 +1,5 @@
 import json
+import platform
 import subprocess
 from pathlib import Path
 
@@ -8,6 +9,19 @@ from openai import OpenAI
 load_dotenv()          # lit ta clé dans le fichier .env
 client = OpenAI()
 MODEL = "gpt-4o-mini"
+
+# Mode dry-run : si True, run_shell affiche les commandes sans les exécuter
+# (on l'active ou le désactive en tapant /dryrun dans le REPL)
+DRY_RUN = False
+
+# Commandes (ou morceaux de commandes) toujours refusées
+FORBIDDEN = [
+    "rm -rf", "rm -r", "rmdir /s", "del /s", "remove-item",   # suppressions massives
+    "format c:", "mkfs", "shutdown", "reboot", "sudo",            # système
+    "git push --force", "git reset --hard",                    # Git destructeur
+    ".env",                                                    # protège la clé API
+    "curl", "wget", "invoke-webrequest",                       # envoi de données sur internet
+]
 
 
 def load_system_prompt():
@@ -114,6 +128,42 @@ def git_status():
     return result.stdout
 
 
+def run_shell(command):
+    """Outil : exécute une commande shell, avec 3 sécurités."""
+    # Sécurité 1 : liste de commandes interdites
+    lowered = command.lower()
+    for forbidden in FORBIDDEN:
+        if forbidden in lowered:
+            return f"Refusé : la commande contient '{forbidden}', qui est interdit."
+
+    # Sécurité 2 : mode dry-run, on montre sans exécuter
+    if DRY_RUN:
+        print(f"  [dry-run] {command}")
+        return f"Mode dry-run : la commande '{command}' n'a PAS été exécutée."
+
+    # Sécurité 3 : confirmation de l'utilisateur
+    if not confirm(f"Exécuter la commande : {command} ?"):
+        return "Commande refusée par l'utilisateur."
+
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,            # passe par le terminal (cmd sous Windows)
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return "Erreur : la commande a dépassé 30 secondes et a été arrêtée."
+
+    output = (result.stdout + result.stderr).strip() or "(aucune sortie)"
+    if len(output) > 5000:         # évite d'envoyer trop de tokens au LLM
+        output = output[:5000] + "\n[... sortie tronquée]"
+    return f"Code de retour : {result.returncode}\n{output}"
+
+
 TOOLS = [
     {
         "type": "function",
@@ -207,6 +257,31 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell",
+            "description": (
+                "Exécute une commande dans le terminal et renvoie sa sortie. "
+                f"Le système est {platform.system()} : utilise des commandes compatibles. "
+                "L'utilisateur doit confirmer chaque commande."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "La commande à exécuter, par exemple 'python --version'.",
+                    },
+                },
+                "required": ["raison", "command"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -219,6 +294,7 @@ TOOL_FUNCTIONS = {
     "list_files": list_files,
     "edit_file": edit_file,
     "git_status": git_status,
+    "run_shell": run_shell,
 }
 
 
@@ -298,9 +374,11 @@ def agent_turn(history):
 
 
 def main():
+    global DRY_RUN  # pour pouvoir modifier la variable DRY_RUN définie en haut du fichier
+
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
     history = [{"role": "system", "content": load_system_prompt()}]
-    print("CodexPilot Code — tape /exit pour quitter")
+    print("CodexPilot Code — tape /exit pour quitter, /dryrun pour le mode dry-run")
 
     # Le REPL : on boucle pour garder la main entre chaque échange
     while True:
@@ -310,6 +388,10 @@ def main():
             print("Au revoir !")
             break
         if not user_input:
+            continue
+        if user_input == "/dryrun":
+            DRY_RUN = not DRY_RUN   # inverse : True devient False et inversement
+            print(f"Mode dry-run : {'activé' if DRY_RUN else 'désactivé'}")
             continue
 
         # 1. On ajoute ton message à l'historique
