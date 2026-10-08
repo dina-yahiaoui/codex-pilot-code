@@ -25,6 +25,30 @@ def read_file(path):
         return f"Erreur en lisant '{path}' : {e}"
 
 
+# Dossiers et fichiers à ne jamais montrer au LLM
+IGNORED = {".git", ".venv", "__pycache__", ".env"}
+
+
+def list_files(path="."):
+    """Outil : liste les fichiers et dossiers d'un dossier."""
+    folder = Path(path)
+    if not folder.is_dir():
+        return f"Erreur : le dossier '{path}' n'existe pas."
+
+    lines = []
+    for item in sorted(folder.iterdir()):
+        if item.name in IGNORED:
+            continue
+        if item.is_dir():
+            lines.append(f"{item.name}/")   # le / montre que c'est un dossier
+        else:
+            lines.append(item.name)
+
+    if not lines:
+        return f"Le dossier '{path}' est vide."
+    return "\n".join(lines)
+
+
 TOOLS = [
     {
         "type": "function",
@@ -46,7 +70,28 @@ TOOLS = [
                 "required": ["raison", "path"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "Liste les fichiers et dossiers d'un dossier du projet.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Dossier à lister, par exemple 'prompts'. '.' pour la racine du projet.",
+                    },
+                },
+                "required": ["raison"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -56,6 +101,7 @@ TOOLS = [
 # Pour ajouter un outil : une ligne ici + sa description dans TOOLS
 TOOL_FUNCTIONS = {
     "read_file": read_file,
+    "list_files": list_files,
 }
 
 
