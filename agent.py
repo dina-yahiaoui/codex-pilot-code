@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -49,6 +50,70 @@ def list_files(path="."):
     return "\n".join(lines)
 
 
+def confirm(question):
+    """Demande oui/non à l'utilisateur. Renvoie True seulement s'il répond oui."""
+    answer = input(f"  {question} (o/n) ").strip().lower()
+    return answer in ("o", "oui")
+
+
+def edit_file(path, old_text, new_text):
+    """Outil : remplace un passage d'un fichier, ou crée le fichier si old_text est vide."""
+    file_path = Path(path)
+
+    if file_path.name == ".env":
+        return "Erreur : modifier le fichier .env est interdit."
+
+    # Cas 1 : créer un nouveau fichier
+    if old_text == "":
+        if file_path.exists():
+            return f"Erreur : '{path}' existe déjà. Donne old_text pour le modifier."
+        print(f"\n  --- nouveau fichier : {path} ---\n{new_text}\n")
+        if not confirm(f"Créer le fichier '{path}' ?"):
+            return "Action annulée par l'utilisateur."
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(new_text, encoding="utf-8")
+        return f"Fichier '{path}' créé."
+
+    # Cas 2 : modifier un fichier existant
+    if not file_path.is_file():
+        return f"Erreur : le fichier '{path}' n'existe pas."
+
+    content = file_path.read_text(encoding="utf-8")
+    count = content.count(old_text)
+    if count == 0:
+        return "Erreur : le texte à remplacer n'a pas été trouvé. Relis le fichier avec read_file."
+    if count > 1:
+        return f"Erreur : le texte à remplacer apparaît {count} fois. Donne un passage plus long."
+
+    print(f"\n  --- avant ---\n{old_text}\n  --- après ---\n{new_text}\n")
+    if not confirm(f"Modifier '{path}' ?"):
+        return "Action annulée par l'utilisateur."
+
+    file_path.write_text(content.replace(old_text, new_text), encoding="utf-8")
+    return f"Fichier '{path}' modifié."
+
+
+def git_status():
+    """Outil : affiche l'état du dépôt Git (branche, fichiers modifiés)."""
+    try:
+        result = subprocess.run(
+            ["git", "status"],
+            capture_output=True,   # récupère ce que la commande affiche
+            text=True,             # en texte, pas en octets
+            encoding="utf-8",
+            errors="replace",      # évite un plantage sur un caractère bizarre
+            timeout=10,            # abandonne après 10 secondes
+        )
+    except FileNotFoundError:
+        return "Erreur : Git n'est pas installé sur cet ordinateur."
+    except subprocess.TimeoutExpired:
+        return "Erreur : git status a mis trop de temps à répondre."
+
+    if result.returncode != 0:     # 0 = succès, autre chose = erreur
+        return f"Erreur Git : {result.stderr.strip()}"
+    return result.stdout
+
+
 TOOLS = [
     {
         "type": "function",
@@ -92,6 +157,56 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": (
+                "Modifie un fichier en remplaçant old_text par new_text. "
+                "Lis toujours le fichier avec read_file avant, pour copier old_text exactement. "
+                "Pour créer un nouveau fichier, mets old_text vide."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Chemin du fichier à modifier ou à créer.",
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "description": "Texte exact à remplacer, copié du fichier. Vide pour créer un fichier.",
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Nouveau texte qui remplace old_text.",
+                    },
+                },
+                "required": ["raison", "path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "Affiche l'état du dépôt Git : branche actuelle, fichiers modifiés ou non suivis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
+                },
+                "required": ["raison"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -102,6 +217,8 @@ TOOLS = [
 TOOL_FUNCTIONS = {
     "read_file": read_file,
     "list_files": list_files,
+    "edit_file": edit_file,
+    "git_status": git_status,
 }
 
 
