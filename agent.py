@@ -49,6 +49,42 @@ TOOLS = [
     }
 ]
 
+# ---------------------------------------------------------------------------
+# L'ORCHESTRATEUR
+# ---------------------------------------------------------------------------
+# Nom de l'outil (ce que le LLM demande) -> fonction Python à exécuter
+# Pour ajouter un outil : une ligne ici + sa description dans TOOLS
+TOOL_FUNCTIONS = {
+    "read_file": read_file,
+}
+
+
+def run_tool(name, arguments_json):
+    """Envoie l'appel du LLM vers la bonne fonction. Ne plante jamais."""
+    # 1. Lire les arguments envoyés par le LLM (texte JSON -> dictionnaire)
+    try:
+        args = json.loads(arguments_json)
+    except json.JSONDecodeError:
+        return f"Erreur : arguments invalides pour l'outil '{name}'."
+
+    # 2. Afficher le raisonnement, puis l'enlever des arguments
+    raison = args.pop("raison", "")
+    if raison:
+        print(f"  [réflexion] {raison}")
+    print(f"  [outil] {name}({args})")
+
+    # 3. Trouver la fonction qui correspond au nom demandé
+    func = TOOL_FUNCTIONS.get(name)
+    if func is None:
+        return f"Erreur : l'outil '{name}' n'existe pas."
+
+    # 4. L'exécuter ; si elle échoue, l'erreur part au LLM au lieu de planter
+    try:
+        return func(**args)
+    except Exception as e:
+        return f"Erreur pendant l'exécution de '{name}' : {e}"
+
+
 MAX_TOOL_ROUNDS = 10  # sécurité : jamais plus de 10 outils à la suite
 
 
@@ -85,19 +121,8 @@ def agent_turn(history):
 
         # 4. On exécute chaque outil demandé et on renvoie le résultat
         for call in message.tool_calls:
-            args = json.loads(call.function.arguments)
-
-            # NOUVEAU : on récupère la raison, on l'affiche, et on l'enlève des arguments
-            raison = args.pop("raison", "")
-            if raison:
-                print(f"  [réflexion] {raison}")
-
-            print(f"  [outil] {call.function.name}({args})")
-
-            if call.function.name == "read_file":
-                result = read_file(args["path"])
-            else:
-                result = f"Erreur : outil inconnu '{call.function.name}'."
+            # L'orchestrateur trouve et exécute le bon outil
+            result = run_tool(call.function.name, call.function.arguments)
 
             history.append({
                 "role": "tool",
