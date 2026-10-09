@@ -1,12 +1,22 @@
 import json
+import os
 import platform
 import subprocess
+import sys
 from pathlib import Path
 
+import openai
 from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()          # lit ta clé dans le fichier .env
+
+# Sans clé, OpenAI() plante : on vérifie avant et on explique quoi faire
+if not os.getenv("OPENAI_API_KEY"):
+    print("Erreur : la clé OPENAI_API_KEY est introuvable.")
+    print("Crée un fichier .env avec la ligne : OPENAI_API_KEY=sk-...")
+    sys.exit(1)
+
 client = OpenAI()
 MODEL = "gpt-4o-mini"
 
@@ -417,7 +427,11 @@ def main():
 
     # Le REPL : on boucle pour garder la main entre chaque échange
     while True:
-        user_input = input("\nvous > ").strip()
+        try:
+            user_input = input("\nvous > ").strip()
+        except (KeyboardInterrupt, EOFError):  # Ctrl+C ou Ctrl+Z / fermeture du terminal
+            print("\nAu revoir !")
+            break
 
         if user_input in ("/exit", "exit", "quit"):
             print("Au revoir !")
@@ -434,12 +448,37 @@ def main():
             print("Historique effacé : nouvelle session.")
             continue
 
+        # On retient la taille de l'historique AVANT l'échange :
+        # en cas d'erreur, on revient à cet état pour ne pas garder un échange à moitié fini
+        size_before = len(history)
+
         # 1. On ajoute ton message à l'historique
         history.append({"role": "user", "content": user_input})
 
         # 2. On lance la boucle agentique (elle ajoute elle-même les réponses à l'historique)
-        answer = agent_turn(history)
-        print(f"\nagent > {answer}")
+        try:
+            answer = agent_turn(history)
+            print(f"\nagent > {answer}")
+        except KeyboardInterrupt:
+            del history[size_before:]
+            print("\n[interrompu] Question annulée.")
+            continue
+        except openai.AuthenticationError:
+            del history[size_before:]
+            print("\n[erreur] Clé API invalide : vérifie OPENAI_API_KEY dans le fichier .env.")
+            continue
+        except openai.APIConnectionError:
+            del history[size_before:]
+            print("\n[erreur] Impossible de joindre OpenAI : vérifie ta connexion internet.")
+            continue
+        except openai.RateLimitError:
+            del history[size_before:]
+            print("\n[erreur] Limite atteinte ou crédit épuisé : réessaie plus tard ou vérifie ton solde.")
+            continue
+        except openai.APIError as e:
+            del history[size_before:]
+            print(f"\n[erreur] Problème avec l'API OpenAI : {e}")
+            continue
 
         # 3. On sauvegarde après chaque échange (rien n'est perdu si le programme s'arrête)
         save_history(history)
