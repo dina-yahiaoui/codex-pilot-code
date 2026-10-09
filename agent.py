@@ -139,7 +139,7 @@ def read_file(path):
 
 
 # Dossiers et fichiers à ne jamais montrer au LLM
-IGNORED = {".git", ".venv", "__pycache__", ".env"}
+IGNORED = {".git", ".venv", "__pycache__", ".env", "history.json"}
 
 
 def list_files(path="."):
@@ -160,6 +160,38 @@ def list_files(path="."):
     if not lines:
         return f"Le dossier '{path}' est vide."
     return "\n".join(lines)
+
+
+MAX_GREP_RESULTS = 50  # au-delà, on coupe pour économiser des tokens
+
+
+def grep(pattern, path="."):
+    """Outil : cherche un texte dans tous les fichiers d'un dossier (et ses sous-dossiers)."""
+    folder = Path(path)
+    if not folder.is_dir():
+        return f"Erreur : le dossier '{path}' n'existe pas."
+
+    results = []
+    for file in sorted(folder.rglob("*")):           # rglob : parcourt aussi les sous-dossiers
+        if any(part in IGNORED for part in file.parts):
+            continue                                  # ignore .git, .venv, .env...
+        if not file.is_file():
+            continue
+        try:
+            lines = file.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue                                  # fichier binaire ou illisible : on passe
+
+        for number, line in enumerate(lines, start=1):
+            if pattern.lower() in line.lower():       # recherche sans tenir compte des majuscules
+                results.append(f"{file}:{number}: {line.strip()}")
+                if len(results) >= MAX_GREP_RESULTS:
+                    results.append(f"[... arrêt après {MAX_GREP_RESULTS} résultats]")
+                    return "\n".join(results)
+
+    if not results:
+        return f"Aucun résultat pour '{pattern}'."
+    return "\n".join(results)
 
 
 def confirm(question):
@@ -312,6 +344,34 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "grep",
+            "description": (
+                "Cherche un texte dans tous les fichiers du projet et renvoie les lignes trouvées "
+                "(fichier:numéro de ligne: contenu). Utile pour trouver où une fonction ou un mot est utilisé."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "raison": {
+                        "type": "string",
+                        "description": "Explique en une phrase pourquoi tu utilises cet outil.",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Le texte à chercher, par exemple 'def main'.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Dossier où chercher. '.' pour tout le projet.",
+                    },
+                },
+                "required": ["raison", "pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "edit_file",
             "description": (
                 "Modifie un fichier en remplaçant old_text par new_text. "
@@ -394,6 +454,7 @@ TOOLS = [
 TOOL_FUNCTIONS = {
     "read_file": read_file,
     "list_files": list_files,
+    "grep": grep,
     "edit_file": edit_file,
     "git_status": git_status,
     "run_shell": run_shell,
@@ -476,11 +537,31 @@ def agent_turn(history):
     return "Arrêt : trop d'appels d'outils à la suite."
 
 
+HELP_TEXT = """
+Commandes :
+  /help     affiche cette aide
+  /dryrun   active ou désactive le mode dry-run (run_shell montre sans exécuter)
+  /reset    efface l'historique et commence une nouvelle session
+  /exit     quitte l'agent (aussi : exit, quit, Ctrl + C)
+"""
+
+
+def print_help():
+    """Affiche les commandes, puis les outils disponibles (lus dans TOOLS)."""
+    print(color(HELP_TEXT, GRAY))
+    print(color("Outils de l'agent :", GRAY))
+    for tool in TOOLS:
+        name = tool["function"]["name"]
+        description = tool["function"]["description"].split(".")[0]  # première phrase
+        print(color(f"  {name:<12}{description}", GRAY))
+    print(color(f"\nMode dry-run : {'activé' if DRY_RUN else 'désactivé'}", GRAY))
+
+
 def main():
     global DRY_RUN  # pour pouvoir modifier la variable DRY_RUN définie en haut du fichier
 
     print(color("CodexPilot Code", BOLD + CYAN))
-    print(color("/exit pour quitter, /dryrun pour le mode dry-run, /reset pour effacer l'historique", GRAY))
+    print(color("Tape /help pour voir les commandes, /exit pour quitter", GRAY))
 
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
     # Il est rechargé depuis history.json s'il existe
@@ -502,6 +583,9 @@ def main():
         if user_input == "/dryrun":
             DRY_RUN = not DRY_RUN   # inverse : True devient False et inversement
             print(color(f"Mode dry-run : {'activé' if DRY_RUN else 'désactivé'}", YELLOW))
+            continue
+        if user_input == "/help":
+            print_help()
             continue
         if user_input == "/reset":
             history = [{"role": "system", "content": load_system_prompt()}]
