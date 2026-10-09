@@ -30,6 +30,39 @@ def load_system_prompt():
     return path.read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# HISTORIQUE SAUVEGARDÉ DANS UN FICHIER JSON
+# ---------------------------------------------------------------------------
+HISTORY_PATH = Path(__file__).parent / "history.json"
+
+
+def save_history(history):
+    """Écrit tout l'historique dans history.json."""
+    HISTORY_PATH.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),  # garde les accents, lisible
+        encoding="utf-8",
+    )
+
+
+def load_history():
+    """Recharge l'historique de la session précédente, ou en crée un nouveau."""
+    system_message = {"role": "system", "content": load_system_prompt()}
+
+    if HISTORY_PATH.exists():
+        try:
+            history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+            if isinstance(history, list) and history:
+                history[0] = system_message  # on remet le system prompt à jour
+                if len(history) > 1:
+                    print(f"Historique chargé : {len(history) - 1} messages de la session précédente.")
+                return history
+        except json.JSONDecodeError:
+            pass
+        print("Historique illisible : nouvelle session.")
+
+    return [system_message]
+
+
 def read_file(path):
     """Outil : lit un fichier texte et renvoie son contenu."""
     try:
@@ -376,9 +409,11 @@ def agent_turn(history):
 def main():
     global DRY_RUN  # pour pouvoir modifier la variable DRY_RUN définie en haut du fichier
 
+    print("CodexPilot Code — /exit pour quitter, /dryrun pour le mode dry-run, /reset pour effacer l'historique")
+
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
-    history = [{"role": "system", "content": load_system_prompt()}]
-    print("CodexPilot Code — tape /exit pour quitter, /dryrun pour le mode dry-run")
+    # Il est rechargé depuis history.json s'il existe
+    history = load_history()
 
     # Le REPL : on boucle pour garder la main entre chaque échange
     while True:
@@ -393,6 +428,11 @@ def main():
             DRY_RUN = not DRY_RUN   # inverse : True devient False et inversement
             print(f"Mode dry-run : {'activé' if DRY_RUN else 'désactivé'}")
             continue
+        if user_input == "/reset":
+            history = [{"role": "system", "content": load_system_prompt()}]
+            save_history(history)
+            print("Historique effacé : nouvelle session.")
+            continue
 
         # 1. On ajoute ton message à l'historique
         history.append({"role": "user", "content": user_input})
@@ -400,6 +440,9 @@ def main():
         # 2. On lance la boucle agentique (elle ajoute elle-même les réponses à l'historique)
         answer = agent_turn(history)
         print(f"\nagent > {answer}")
+
+        # 3. On sauvegarde après chaque échange (rien n'est perdu si le programme s'arrête)
+        save_history(history)
 
 
 if __name__ == "__main__":
