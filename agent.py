@@ -3,6 +3,8 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import openai
@@ -28,6 +30,38 @@ CYAN = "\033[96m"
 def color(text, code):
     """Entoure le texte d'un code couleur, puis revient à la normale."""
     return f"{code}{text}{RESET}"
+
+
+# ---------------------------------------------------------------------------
+# SPINNER : petite animation pendant que le LLM réfléchit
+# ---------------------------------------------------------------------------
+class Spinner:
+    """Affiche une animation tant qu'on est dans le bloc `with Spinner():`."""
+
+    FRAMES = ["|", "/", "-", "\\"]
+
+    def __init__(self, text="L'agent réfléchit"):
+        self.text = text
+        self.stop_event = threading.Event()   # le "drapeau" pour arrêter l'animation
+        self.thread = threading.Thread(target=self._animate, daemon=True)
+
+    def _animate(self):
+        i = 0
+        while not self.stop_event.is_set():
+            frame = self.FRAMES[i % len(self.FRAMES)]
+            print(color(f"\r  {frame} {self.text}...", CYAN), end="", flush=True)
+            i += 1
+            time.sleep(0.1)
+        # efface la ligne de l'animation
+        print("\r" + " " * (len(self.text) + 10) + "\r", end="", flush=True)
+
+    def __enter__(self):          # au début du bloc with : on lance l'animation
+        self.thread.start()
+        return self
+
+    def __exit__(self, *args):    # à la fin du bloc with (même en cas d'erreur) : on l'arrête
+        self.stop_event.set()
+        self.thread.join()
 
 
 load_dotenv()          # lit ta clé dans le fichier .env
@@ -399,9 +433,10 @@ def agent_turn(history):
     """La boucle agentique : tourne jusqu'à ce que le LLM réponde sans demander d'outil."""
     for _ in range(MAX_TOOL_ROUNDS):
         # 1. On envoie l'historique ET la liste des outils
-        response = client.chat.completions.create(
-            model=MODEL, messages=history, tools=TOOLS
-        )
+        with Spinner():  # animation pendant l'attente de la réponse
+            response = client.chat.completions.create(
+                model=MODEL, messages=history, tools=TOOLS
+            )
         message = response.choices[0].message
 
         # 2. Pas de demande d'outil -> c'est la réponse finale
