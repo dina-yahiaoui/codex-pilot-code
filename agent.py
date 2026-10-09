@@ -9,11 +9,32 @@ import openai
 from dotenv import load_dotenv
 from openai import OpenAI
 
+# ---------------------------------------------------------------------------
+# COULEURS DU TERMINAL (codes ANSI, sans bibliothèque)
+# ---------------------------------------------------------------------------
+if platform.system() == "Windows":
+    os.system("")  # active les couleurs dans le terminal Windows
+
+RESET = "\033[0m"     # revient à la couleur normale
+BOLD = "\033[1m"
+GRAY = "\033[90m"
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+CYAN = "\033[96m"
+
+
+def color(text, code):
+    """Entoure le texte d'un code couleur, puis revient à la normale."""
+    return f"{code}{text}{RESET}"
+
+
 load_dotenv()          # lit ta clé dans le fichier .env
 
 # Sans clé, OpenAI() plante : on vérifie avant et on explique quoi faire
 if not os.getenv("OPENAI_API_KEY"):
-    print("Erreur : la clé OPENAI_API_KEY est introuvable.")
+    print(color("Erreur : la clé OPENAI_API_KEY est introuvable.", RED))
     print("Crée un fichier .env avec la ligne : OPENAI_API_KEY=sk-...")
     sys.exit(1)
 
@@ -64,11 +85,11 @@ def load_history():
             if isinstance(history, list) and history:
                 history[0] = system_message  # on remet le system prompt à jour
                 if len(history) > 1:
-                    print(f"Historique chargé : {len(history) - 1} messages de la session précédente.")
+                    print(color(f"Historique chargé : {len(history) - 1} messages de la session précédente.", GRAY))
                 return history
         except json.JSONDecodeError:
             pass
-        print("Historique illisible : nouvelle session.")
+        print(color("Historique illisible : nouvelle session.", YELLOW))
 
     return [system_message]
 
@@ -109,7 +130,7 @@ def list_files(path="."):
 
 def confirm(question):
     """Demande oui/non à l'utilisateur. Renvoie True seulement s'il répond oui."""
-    answer = input(f"  {question} (o/n) ").strip().lower()
+    answer = input(color(f"  {question} (o/n) ", YELLOW)).strip().lower()
     return answer in ("o", "oui")
 
 
@@ -124,7 +145,8 @@ def edit_file(path, old_text, new_text):
     if old_text == "":
         if file_path.exists():
             return f"Erreur : '{path}' existe déjà. Donne old_text pour le modifier."
-        print(f"\n  --- nouveau fichier : {path} ---\n{new_text}\n")
+        print(color(f"\n  --- nouveau fichier : {path} ---", BOLD))
+        print(color(new_text, GREEN) + "\n")
         if not confirm(f"Créer le fichier '{path}' ?"):
             return "Action annulée par l'utilisateur."
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,7 +164,10 @@ def edit_file(path, old_text, new_text):
     if count > 1:
         return f"Erreur : le texte à remplacer apparaît {count} fois. Donne un passage plus long."
 
-    print(f"\n  --- avant ---\n{old_text}\n  --- après ---\n{new_text}\n")
+    print(color("\n  --- avant ---", BOLD))
+    print(color(old_text, RED))
+    print(color("  --- après ---", BOLD))
+    print(color(new_text, GREEN) + "\n")
     if not confirm(f"Modifier '{path}' ?"):
         return "Action annulée par l'utilisateur."
 
@@ -181,7 +206,7 @@ def run_shell(command):
 
     # Sécurité 2 : mode dry-run, on montre sans exécuter
     if DRY_RUN:
-        print(f"  [dry-run] {command}")
+        print(color(f"  [dry-run] {command}", YELLOW))
         return f"Mode dry-run : la commande '{command}' n'a PAS été exécutée."
 
     # Sécurité 3 : confirmation de l'utilisateur
@@ -352,8 +377,8 @@ def run_tool(name, arguments_json):
     # 2. Afficher le raisonnement, puis l'enlever des arguments
     raison = args.pop("raison", "")
     if raison:
-        print(f"  [réflexion] {raison}")
-    print(f"  [outil] {name}({args})")
+        print(color(f"  [réflexion] {raison}", GRAY))
+    print(color(f"  [outil] {name}({args})", BLUE))
 
     # 3. Trouver la fonction qui correspond au nom demandé
     func = TOOL_FUNCTIONS.get(name)
@@ -419,7 +444,8 @@ def agent_turn(history):
 def main():
     global DRY_RUN  # pour pouvoir modifier la variable DRY_RUN définie en haut du fichier
 
-    print("CodexPilot Code — /exit pour quitter, /dryrun pour le mode dry-run, /reset pour effacer l'historique")
+    print(color("CodexPilot Code", BOLD + CYAN))
+    print(color("/exit pour quitter, /dryrun pour le mode dry-run, /reset pour effacer l'historique", GRAY))
 
     # L'historique, gardé par NOTRE programme (le serveur ne se souvient de rien)
     # Il est rechargé depuis history.json s'il existe
@@ -428,7 +454,7 @@ def main():
     # Le REPL : on boucle pour garder la main entre chaque échange
     while True:
         try:
-            user_input = input("\nvous > ").strip()
+            user_input = input(color("\nvous > ", BOLD)).strip()
         except (KeyboardInterrupt, EOFError):  # Ctrl+C ou Ctrl+Z / fermeture du terminal
             print("\nAu revoir !")
             break
@@ -440,12 +466,12 @@ def main():
             continue
         if user_input == "/dryrun":
             DRY_RUN = not DRY_RUN   # inverse : True devient False et inversement
-            print(f"Mode dry-run : {'activé' if DRY_RUN else 'désactivé'}")
+            print(color(f"Mode dry-run : {'activé' if DRY_RUN else 'désactivé'}", YELLOW))
             continue
         if user_input == "/reset":
             history = [{"role": "system", "content": load_system_prompt()}]
             save_history(history)
-            print("Historique effacé : nouvelle session.")
+            print(color("Historique effacé : nouvelle session.", YELLOW))
             continue
 
         # On retient la taille de l'historique AVANT l'échange :
@@ -458,26 +484,26 @@ def main():
         # 2. On lance la boucle agentique (elle ajoute elle-même les réponses à l'historique)
         try:
             answer = agent_turn(history)
-            print(f"\nagent > {answer}")
+            print(color("\nagent > ", BOLD + GREEN) + str(answer))
         except KeyboardInterrupt:
             del history[size_before:]
-            print("\n[interrompu] Question annulée.")
+            print(color("\n[interrompu] Question annulée.", YELLOW))
             continue
         except openai.AuthenticationError:
             del history[size_before:]
-            print("\n[erreur] Clé API invalide : vérifie OPENAI_API_KEY dans le fichier .env.")
+            print(color("\n[erreur] Clé API invalide : vérifie OPENAI_API_KEY dans le fichier .env.", RED))
             continue
         except openai.APIConnectionError:
             del history[size_before:]
-            print("\n[erreur] Impossible de joindre OpenAI : vérifie ta connexion internet.")
+            print(color("\n[erreur] Impossible de joindre OpenAI : vérifie ta connexion internet.", RED))
             continue
         except openai.RateLimitError:
             del history[size_before:]
-            print("\n[erreur] Limite atteinte ou crédit épuisé : réessaie plus tard ou vérifie ton solde.")
+            print(color("\n[erreur] Limite atteinte ou crédit épuisé : réessaie plus tard ou vérifie ton solde.", RED))
             continue
         except openai.APIError as e:
             del history[size_before:]
-            print(f"\n[erreur] Problème avec l'API OpenAI : {e}")
+            print(color(f"\n[erreur] Problème avec l'API OpenAI : {e}", RED))
             continue
 
         # 3. On sauvegarde après chaque échange (rien n'est perdu si le programme s'arrête)
