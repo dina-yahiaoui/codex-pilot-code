@@ -130,6 +130,8 @@ def load_history():
 
 def read_file(path):
     """Outil : lit un fichier texte et renvoie son contenu."""
+    if Path(path).name == ".env":
+        return "Erreur : lire le fichier .env est interdit (il contient la clé API)."
     try:
         return Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
