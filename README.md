@@ -150,8 +150,6 @@ codex-pilot-code/
 ├── requirements.txt      dépendances (openai, python-dotenv)
 ├── .env.example          modèle pour le fichier .env
 ├── .gitignore            exclut .env, .venv et history.json
-├── TESTS.md              liste des tests à faire à la main
-├── JOURNAL_DES_TESTS.md  tests réalisés pendant le développement et résultats
 └── README.md
 ```
 
